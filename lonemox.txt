@@ -1,0 +1,189 @@
+import { useEffect, useState } from "react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Button, Input } from "@/components/ui/button";
+import { io } from "socket.io-client";
+import { Server, Edit, Trash, Sliders } from "lucide-react";
+
+const socket = io("http://localhost:5000");
+
+export default function Dashboard() {
+  const [containers, setContainers] = useState([]);
+  const [editingContainer, setEditingContainer] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch containers on mount
+  useEffect(() => {
+    const abortController = new AbortController();
+
+    const fetchContainers = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/api/container/list", {
+          signal: abortController.signal,
+        });
+        const data = await res.json();
+        setContainers(data.containers);
+      } catch (error) {
+        if (error.name !== "AbortError") {
+          console.error("Failed to fetch containers:", error);
+        }
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchContainers();
+
+    return () => {
+      abortController.abort();
+    };
+  }, []);
+
+  // Real-time updates with Socket.IO
+  useEffect(() => {
+    socket.on("container-updated", (updatedContainer) => {
+      setContainers((prevContainers) =>
+        prevContainers.map((container) =>
+          container.id === updatedContainer.id ? updatedContainer : container
+        )
+      );
+    });
+
+    socket.on("container-deleted", (deletedContainerId) => {
+      setContainers((prevContainers) =>
+        prevContainers.filter((container) => container.id !== deletedContainerId)
+      );
+    });
+
+    return () => {
+      socket.off("container-updated");
+      socket.off("container-deleted");
+    };
+  }, []);
+
+  const handleDeleteContainer = async (id) => {
+    try {
+      await fetch("http://localhost:5000/api/container/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ container_id: id }),
+      });
+      socket.emit("container-deleted", id);
+    } catch (error) {
+      console.error("Failed to delete container:", error);
+    }
+  };
+
+  const handleEditContainer = (container) => {
+    setEditingContainer({ ...container });
+  };
+
+  const handleSaveEditContainer = async () => {
+    if (!editingContainer.name || editingContainer.cpu <= 0 || editingContainer.memory <= 0) {
+      alert("Please provide valid values for name, CPU, and memory.");
+      return;
+    }
+
+    try {
+      await fetch("http://localhost:5000/api/container/update", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editingContainer),
+      });
+      socket.emit("container-updated", editingContainer);
+      setEditingContainer(null);
+    } catch (error) {
+      console.error("Failed to update container:", error);
+    }
+  };
+
+  if (loading) {
+    return <div className="p-6 text-center">Loading containers...</div>;
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-6">
+      {containers.map((container) => (
+        <Card key={container.id}>
+          <CardContent className="flex items-center justify-between p-4">
+            <Server className="text-green-500" size={32} />
+            <div>
+              <h2 className="text-lg font-bold">{container.name}</h2>
+              <p className="text-gray-400">Status: {container.status}</p>
+              <p className="text-gray-400">CPU: {container.cpu} cores</p>
+              <p className="text-gray-400">RAM: {container.memory} MB</p>
+            </div>
+            <div>
+              <Button onClick={() => handleEditContainer(container)} className="mr-2">
+                <Edit size={16} />
+              </Button>
+              <Button
+                onClick={() => handleDeleteContainer(container.id)}
+                variant="destructive"
+                className="mr-2"
+              >
+                <Trash size={16} />
+              </Button>
+              <Button onClick={() => alert('Resource management coming soon!')}>
+                <Sliders size={16} />
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ))}
+
+      {editingContainer && (
+        <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
+          <div className="bg-gray-900 p-6 rounded-lg w-96 relative">
+            <button
+              onClick={() => setEditingContainer(null)}
+              className="absolute top-2 right-2 text-gray-400 hover:text-white"
+            >
+              ✕
+            </button>
+            <h2 className="text-lg font-bold text-white mb-4">Edit Container</h2>
+            <Input
+              placeholder="Container Name"
+              value={editingContainer.name}
+              onChange={(e) =>
+                setEditingContainer({ ...editingContainer, name: e.target.value })
+              }
+              className="mb-2"
+            />
+            <Input
+              type="number"
+              placeholder="CPU Cores"
+              value={editingContainer.cpu}
+              onChange={(e) =>
+                setEditingContainer({
+                  ...editingContainer,
+                  cpu: Math.max(1, parseInt(e.target.value)),
+                })
+              }
+              className="mb-2"
+            />
+            <Input
+              type="number"
+              placeholder="Memory (MB)"
+              value={editingContainer.memory}
+              onChange={(e) =>
+                setEditingContainer({
+                  ...editingContainer,
+                  memory: Math.max(128, parseInt(e.target.value)),
+                })
+              }
+              className="mb-2"
+            />
+            <div className="flex justify-between">
+              <Button onClick={handleSaveEditContainer} className="flex items-center gap-2">
+                <Edit size={16} /> Save Changes
+              </Button>
+              <Button onClick={() => setEditingContainer(null)} variant="destructive">
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
