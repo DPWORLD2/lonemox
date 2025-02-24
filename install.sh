@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e  # Exit immediately if a command fails
+set -e  # Exit on error
 LOGFILE="/var/log/lonemox-install.log"
 exec > >(tee -a $LOGFILE) 2>&1  # Log everything
 
@@ -87,11 +87,11 @@ cd ../frontend
 npm install
 npm run build
 
-# Serve frontend with Nginx
+# Serve frontend with Nginx (localhost instead of domain)
 sudo tee /etc/nginx/sites-available/lonemox > /dev/null <<EOF
 server {
     listen 80;
-    server_name yourdomain.com;
+    server_name localhost;
 
     root /opt/lonemox-ve/frontend/build;
     index index.html;
@@ -112,4 +112,20 @@ EOF
 
 sudo ln -s /etc/nginx/sites-available/lonemox /etc/nginx/sites-enabled/
 sudo systemctl restart nginx
+
+# GPU Support (AMD & Intel)
+echo "🎮 Configuring GPU support..."
+sudo apt install -y mesa-utils vulkan-tools
+if lspci | grep -i amd; then
+  echo "🟠 Installing ROCm for AMD GPUs..."
+  sudo apt install -y rocm-opencl-runtime
+elif lspci | grep -i intel; then
+  echo "🔵 Installing Intel GPU drivers..."
+  sudo apt install -y intel-media-va-driver-non-free
+fi
+
+# Final steps
+echo "✅ Installation complete!"
+echo "🌐 Access Lonemox VE dashboard at http://localhost"
+echo "📜 Logs are saved at $LOGFILE"
 
